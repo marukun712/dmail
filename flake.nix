@@ -29,13 +29,15 @@
             "rust-src"
             "rustfmt"
           ];
-          targets = [ "wasm32-wasip2" ];
         };
       in
       {
         devShell = pkgs.mkShell {
           buildInputs = [ 
             rust
+            pkgs.pkg-config
+            pkgs.openssl
+            pkgs.taplo
           ];
         };
       }
