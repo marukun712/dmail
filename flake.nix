@@ -33,7 +33,7 @@
       in
       {
         devShell = pkgs.mkShell {
-          buildInputs = [ 
+          buildInputs = [
             rust
             pkgs.pkg-config
             pkgs.openssl
