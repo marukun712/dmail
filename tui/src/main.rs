@@ -26,6 +26,14 @@ fn get_vault_path() -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
+fn get_did_path() -> anyhow::Result<PathBuf> {
+    let home = std::env::var("HOME")?;
+    let mut path = PathBuf::from(home);
+    path.push(".dmail");
+    path.push("did.json");
+    Ok(path)
+}
+
 fn encrypt_vault(keys: &[KeyPair], pass: &str) -> anyhow::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(keys)?;
     let passphrase = SecretString::from(pass.to_owned());
@@ -396,16 +404,38 @@ fn did_gen_dialog(s: &mut cursive::Cursive) {
                             })
                             .collect();
 
+                        let key_agreement: Vec<String> = keys
+                            .iter()
+                            .filter(|k| k.key_type == "X25519KeyAgreementKey2019")
+                            .map(|k| format!("{}#{}", did, k.id))
+                            .collect();
+
+                        let assertion_method: Vec<String> = keys
+                            .iter()
+                            .filter(|k| k.key_type == "Ed25519VerificationKey2020")
+                            .map(|k| format!("{}#{}", did, k.id))
+                            .collect();
+
                         let doc = serde_json::json!({
-                            "verificationMethod": verification_methods
+                            "verificationMethod": verification_methods,
+                            "keyAgreement": key_agreement,
+                            "assertionMethod": assertion_method
                         });
 
                         let pretty =
                             serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".to_string());
 
+                        let pretty_for_save = pretty.clone();
+
                         s.add_layer(
                             Dialog::around(TextView::new(pretty).scrollable().fixed_size((80, 20)))
                                 .title("Generated DID Document")
+                                .button("Save", move |s| {
+                                    let path = get_did_path().unwrap();
+                                    fs::write(path, &pretty_for_save).unwrap();
+
+                                    s.add_layer(Dialog::info("Saved to ~/.dmail/did.json"));
+                                })
                                 .button("Close", |s| {
                                     s.pop_layer();
                                 }),
