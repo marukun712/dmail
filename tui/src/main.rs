@@ -1,4 +1,4 @@
-use age::secrecy::SecretString;
+use age::secrecy::{ExposeSecretMut, SecretString};
 use anyhow::anyhow;
 use cursive::theme::Theme;
 use cursive::traits::*;
@@ -95,10 +95,10 @@ fn init(pass: String) -> anyhow::Result<bool> {
     Ok(true)
 }
 
-fn show_unlock_or_init(s: &mut cursive::Cursive) {
+fn unlock_or_init(s: &mut cursive::Cursive) {
     match get_vault_path() {
-        Ok(path) if path.exists() => show_unlock_dialog(s),
-        Ok(_) => show_init_dialog(s),
+        Ok(path) if path.exists() => unlock_dialog(s),
+        Ok(_) => init_dialog(s),
         Err(e) => {
             s.add_layer(
                 Dialog::text(format!("Failed to determine vault path:\n{}", e))
@@ -109,7 +109,7 @@ fn show_unlock_or_init(s: &mut cursive::Cursive) {
     }
 }
 
-fn show_unlock_dialog(s: &mut cursive::Cursive) {
+fn unlock_dialog(s: &mut cursive::Cursive) {
     s.add_layer(
         Dialog::new()
             .title("Unlock Vault")
@@ -149,7 +149,7 @@ fn show_unlock_dialog(s: &mut cursive::Cursive) {
     );
 }
 
-fn show_init_dialog(s: &mut cursive::Cursive) {
+fn init_dialog(s: &mut cursive::Cursive) {
     s.add_layer(
         Dialog::new()
             .title("Initialize Vault")
@@ -190,20 +190,22 @@ fn show_init_dialog(s: &mut cursive::Cursive) {
 }
 
 fn show_main_menu(s: &mut cursive::Cursive, passphrase: String, keys: Vec<KeyPair>) {
-    s.set_user_data((passphrase, keys));
+    s.set_user_data((SecretString::new(passphrase.into()), keys));
 
     s.add_layer(
         Dialog::text("Select an action")
             .title("Vault Menu")
-            .button("List Keys", |s| show_key_list(s))
-            .button("Add Key", |s| show_add_key_dialog(s))
-            .button("Delete Key", |s| show_delete_key_dialog(s))
+            .button("List Keys", |s| key_list(s))
+            .button("Add Key", |s| add_dialog(s))
+            .button("Edit Key", |s| edit_dialog(s))
+            .button("Delete Key", |s| delete_dialog(s))
+            .button("Generate DID Document", |s| did_gen_dialog(s))
             .button("Quit", |s| s.quit()),
     );
 }
 
-fn show_key_list(s: &mut cursive::Cursive) {
-    if let Some((_, keys)) = s.user_data::<(String, Vec<KeyPair>)>() {
+fn key_list(s: &mut cursive::Cursive) {
+    if let Some((_, keys)) = s.user_data::<(SecretString, Vec<KeyPair>)>() {
         let mut select = SelectView::new();
         for k in keys.iter() {
             select.add_item(format!("{} [{}]", k.id, k.key_type), ());
@@ -219,7 +221,7 @@ fn show_key_list(s: &mut cursive::Cursive) {
     }
 }
 
-fn show_add_key_dialog(s: &mut cursive::Cursive) {
+fn add_dialog(s: &mut cursive::Cursive) {
     s.add_layer(
         Dialog::new()
             .title("Add Key")
@@ -244,14 +246,14 @@ fn show_add_key_dialog(s: &mut cursive::Cursive) {
                 });
 
                 if let (Some(id), Some(Some(kind))) = (id, kind) {
-                    if let Some((pass, keys)) = s.user_data::<(String, Vec<KeyPair>)>() {
+                    if let Some((pass, keys)) = s.user_data::<(SecretString, Vec<KeyPair>)>() {
                         let new_key = match kind {
                             "ed25519" => ed25519_gen(id),
                             _ => x25519_gen(id),
                         };
 
                         keys.push(new_key);
-                        let _ = save_vault(keys, pass);
+                        let _ = save_vault(keys, pass.expose_secret_mut());
                     }
                 }
 
@@ -263,8 +265,8 @@ fn show_add_key_dialog(s: &mut cursive::Cursive) {
     );
 }
 
-fn show_delete_key_dialog(s: &mut cursive::Cursive) {
-    if let Some((_, keys)) = s.user_data::<(String, Vec<KeyPair>)>() {
+fn edit_dialog(s: &mut cursive::Cursive) {
+    if let Some((_, keys)) = s.user_data::<(SecretString, Vec<KeyPair>)>() {
         let mut select = SelectView::new();
 
         for (i, k) in keys.iter().enumerate() {
@@ -275,10 +277,83 @@ fn show_delete_key_dialog(s: &mut cursive::Cursive) {
             Dialog::around(
                 select
                     .on_submit(|s, index| {
-                        if let Some((pass, keys)) = s.user_data::<(String, Vec<KeyPair>)>() {
+                        let idx = *index;
+
+                        let current_id = if let Some((_, keys)) =
+                            s.user_data::<(SecretString, Vec<KeyPair>)>()
+                        {
+                            keys.get(idx).map(|k| k.id.clone())
+                        } else {
+                            None
+                        };
+
+                        if let Some(current_id) = current_id {
+                            s.add_layer(
+                                Dialog::new()
+                                    .title("Edit Key ID")
+                                    .content(
+                                        LinearLayout::vertical()
+                                            .child(TextView::new("New Key ID:"))
+                                            .child(
+                                                EditView::new()
+                                                    .content(current_id)
+                                                    .with_name("edit_key_id")
+                                                    .fixed_width(30),
+                                            ),
+                                    )
+                                    .button("Save", move |s| {
+                                        let new_id = s
+                                            .call_on_name("edit_key_id", |v: &mut EditView| {
+                                                v.get_content().to_string()
+                                            });
+
+                                        if let Some(new_id) = new_id {
+                                            if let Some((pass, keys)) =
+                                                s.user_data::<(String, Vec<KeyPair>)>()
+                                            {
+                                                if idx < keys.len() {
+                                                    keys[idx].id = new_id;
+                                                    let _ = save_vault(keys, pass);
+                                                }
+                                            }
+                                        }
+
+                                        s.pop_layer();
+                                        s.pop_layer();
+                                    })
+                                    .button("Cancel", |s| {
+                                        s.pop_layer();
+                                    }),
+                            );
+                        }
+                    })
+                    .scrollable()
+                    .fixed_size((60, 20)),
+            )
+            .title("Edit Key")
+            .button("Back", |s| {
+                s.pop_layer();
+            }),
+        );
+    }
+}
+
+fn delete_dialog(s: &mut cursive::Cursive) {
+    if let Some((_, keys)) = s.user_data::<(SecretString, Vec<KeyPair>)>() {
+        let mut select = SelectView::new();
+
+        for (i, k) in keys.iter().enumerate() {
+            select.add_item(format!("{} [{}]", k.id, k.key_type), i);
+        }
+
+        s.add_layer(
+            Dialog::around(
+                select
+                    .on_submit(|s, index| {
+                        if let Some((pass, keys)) = s.user_data::<(SecretString, Vec<KeyPair>)>() {
                             if *index < keys.len() {
                                 keys.remove(*index);
-                                let _ = save_vault(keys, pass);
+                                let _ = save_vault(keys, pass.expose_secret_mut());
                             }
                         }
                         s.pop_layer();
@@ -294,9 +369,59 @@ fn show_delete_key_dialog(s: &mut cursive::Cursive) {
     }
 }
 
+fn did_gen_dialog(s: &mut cursive::Cursive) {
+    s.add_layer(
+        Dialog::new()
+            .title("Register Verification Methods from DID Document")
+            .content(
+                LinearLayout::vertical()
+                    .child(TextView::new("DID:"))
+                    .child(EditView::new().with_name("did_input").fixed_width(50)),
+            )
+            .button("Generate JSON", |s| {
+                let did =
+                    s.call_on_name("did_input", |v: &mut EditView| v.get_content().to_string());
+
+                if let Some(did) = did {
+                    if let Some((_, keys)) = s.user_data::<(SecretString, Vec<KeyPair>)>() {
+                        let verification_methods: Vec<serde_json::Value> = keys
+                            .iter()
+                            .map(|k| {
+                                serde_json::json!({
+                                    "id": format!("{}#{}", did, k.id),
+                                    "type": k.key_type,
+                                    "controller": did,
+                                    "publicKeyBase58": k.pk,
+                                })
+                            })
+                            .collect();
+
+                        let doc = serde_json::json!({
+                            "verificationMethod": verification_methods
+                        });
+
+                        let pretty =
+                            serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".to_string());
+
+                        s.add_layer(
+                            Dialog::around(TextView::new(pretty).scrollable().fixed_size((80, 20)))
+                                .title("Generated DID Document")
+                                .button("Close", |s| {
+                                    s.pop_layer();
+                                }),
+                        );
+                    }
+                }
+            })
+            .button("Cancel", |s| {
+                s.pop_layer();
+            }),
+    );
+}
+
 fn main() {
     let mut siv = cursive::default();
     siv.set_theme(Theme::retro());
-    show_unlock_or_init(&mut siv);
+    unlock_or_init(&mut siv);
     siv.run();
 }
