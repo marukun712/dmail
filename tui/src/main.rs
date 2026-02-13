@@ -64,8 +64,8 @@ fn ed25519_gen(id: String) -> KeyPair {
 
     KeyPair {
         id,
-        sk: bs58::encode(signing_key.to_bytes()).into_string(),
-        pk: bs58::encode(verifying_key.to_bytes()).into_string(),
+        sk: multibase::encode(multibase::Base::Base58Btc, signing_key.to_bytes()),
+        pk: multibase::encode(multibase::Base::Base58Btc, verifying_key.to_bytes()),
         key_type: "Ed25519VerificationKey2020".to_string(),
     }
 }
@@ -76,8 +76,8 @@ fn x25519_gen(id: String) -> KeyPair {
 
     KeyPair {
         id,
-        sk: bs58::encode(secret.to_bytes()).into_string(),
-        pk: bs58::encode(public.to_bytes()).into_string(),
+        sk: multibase::encode(multibase::Base::Base58Btc, secret.to_bytes()),
+        pk: multibase::encode(multibase::Base::Base58Btc, public.to_bytes()),
         key_type: "X25519KeyAgreementKey2019".to_string(),
     }
 }
