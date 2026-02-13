@@ -1,14 +1,16 @@
-use age::secrecy::{ExposeSecretMut, SecretString};
+use age::secrecy::{ExposeSecret, SecretString};
 use anyhow::anyhow;
 use cursive::traits::*;
 use cursive::views::{Dialog, EditView, LinearLayout, SelectView, TextView};
 use ed25519_dalek::SigningKey;
+use rand::RngCore;
 use rand::rngs::OsRng;
+use secp256k1::{Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 use x25519_dalek::{PublicKey, StaticSecret};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct KeyPair {
     id: String,
     pk: String,
@@ -54,6 +56,23 @@ fn save_vault(keys: &[KeyPair], passphrase: &str) -> anyhow::Result<bool> {
     let encrypted = encrypt_vault(keys, passphrase)?;
     fs::write(&path, encrypted)?;
     Ok(true)
+}
+
+fn secp256k1_gen(id: String) -> KeyPair {
+    let mut csprng = OsRng;
+    let mut bytes = [0u8; 32];
+    csprng.fill_bytes(&mut bytes);
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_byte_array(bytes).expect("32 bytes, within curve order");
+    let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+
+    KeyPair {
+        id,
+        sk: multibase::encode(multibase::Base::Base58Btc, secret_key.secret_bytes()),
+        pk: multibase::encode(multibase::Base::Base58Btc, public_key.serialize()),
+        key_type: "EcdsaSecp256k1VerificationKey2019".to_string(),
+    }
 }
 
 fn ed25519_gen(id: String) -> KeyPair {
@@ -240,6 +259,7 @@ fn add_dialog(s: &mut cursive::Cursive) {
                     .child(
                         SelectView::<&'static str>::new()
                             .item("Ed25519", "ed25519")
+                            .item("Secp256k1", "secp256k1")
                             .item("X25519", "x25519")
                             .with_name("key_type")
                             .fixed_width(30),
@@ -255,12 +275,13 @@ fn add_dialog(s: &mut cursive::Cursive) {
                 if let (Some(id), Some(Some(kind))) = (id, kind) {
                     if let Some((pass, keys)) = s.user_data::<(SecretString, Vec<KeyPair>)>() {
                         let new_key = match kind {
+                            "secp256k1" => secp256k1_gen(id),
                             "ed25519" => ed25519_gen(id),
                             _ => x25519_gen(id),
                         };
 
                         keys.push(new_key);
-                        let _ = save_vault(keys, pass.expose_secret_mut());
+                        let _ = save_vault(keys, pass.expose_secret());
                     }
                 }
 
@@ -316,11 +337,11 @@ fn edit_dialog(s: &mut cursive::Cursive) {
 
                                         if let Some(new_id) = new_id {
                                             if let Some((pass, keys)) =
-                                                s.user_data::<(String, Vec<KeyPair>)>()
+                                                s.user_data::<(SecretString, Vec<KeyPair>)>()
                                             {
                                                 if idx < keys.len() {
                                                     keys[idx].id = new_id;
-                                                    let _ = save_vault(keys, pass);
+                                                    let _ = save_vault(keys, pass.expose_secret());
                                                 }
                                             }
                                         }
@@ -360,7 +381,7 @@ fn delete_dialog(s: &mut cursive::Cursive) {
                         if let Some((pass, keys)) = s.user_data::<(SecretString, Vec<KeyPair>)>() {
                             if *index < keys.len() {
                                 keys.remove(*index);
-                                let _ = save_vault(keys, pass.expose_secret_mut());
+                                let _ = save_vault(keys, pass.expose_secret());
                             }
                         }
                         s.pop_layer();
