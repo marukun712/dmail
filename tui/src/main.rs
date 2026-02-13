@@ -1,6 +1,5 @@
 use age::secrecy::{ExposeSecretMut, SecretString};
 use anyhow::anyhow;
-use cursive::theme::Theme;
 use cursive::traits::*;
 use cursive::views::{Dialog, EditView, LinearLayout, SelectView, TextView};
 use ed25519_dalek::SigningKey;
@@ -399,7 +398,7 @@ fn did_gen_dialog(s: &mut cursive::Cursive) {
                                     "id": format!("{}#{}", did, k.id),
                                     "type": k.key_type,
                                     "controller": did,
-                                    "publicKeyBase58": k.pk,
+                                    "publicKeyMultibase": k.pk,
                                 })
                             })
                             .collect();
@@ -417,6 +416,11 @@ fn did_gen_dialog(s: &mut cursive::Cursive) {
                             .collect();
 
                         let doc = serde_json::json!({
+                            "@context": [
+                                "https://www.w3.org/ns/did/v1",
+                                "https://w3id.org/security/suites/ed25519-2020/v1"
+                            ],
+                            "id":did,
                             "verificationMethod": verification_methods,
                             "keyAgreement": key_agreement,
                             "assertionMethod": assertion_method
@@ -451,7 +455,6 @@ fn did_gen_dialog(s: &mut cursive::Cursive) {
 
 fn main() {
     let mut siv = cursive::default();
-    siv.set_theme(Theme::retro());
     unlock_or_init(&mut siv);
     siv.run();
 }
