@@ -58,6 +58,13 @@ fn save_vault(keys: &[KeyPair], passphrase: &str) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+fn open(pass: String) -> anyhow::Result<Vec<KeyPair>> {
+    let path = get_vault_path()?;
+    let bytes = fs::read(path)?;
+    let keys = decrypt_vault(&bytes, &pass)?;
+    Ok(keys)
+}
+
 fn secp256k1_gen(id: String) -> KeyPair {
     let mut csprng = OsRng;
     let mut bytes = [0u8; 32];
@@ -67,10 +74,13 @@ fn secp256k1_gen(id: String) -> KeyPair {
     let secret_key = SecretKey::from_byte_array(bytes).expect("32 bytes, within curve order");
     let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
 
+    let mut pk_prefixed = vec![0xe7, 0x01];
+    pk_prefixed.extend_from_slice(&public_key.serialize());
+
     KeyPair {
         id,
         sk: multibase::encode(multibase::Base::Base58Btc, secret_key.secret_bytes()),
-        pk: multibase::encode(multibase::Base::Base58Btc, public_key.serialize()),
+        pk: multibase::encode(multibase::Base::Base58Btc, pk_prefixed),
         key_type: "EcdsaSecp256k1VerificationKey2019".to_string(),
     }
 }
@@ -80,10 +90,13 @@ fn ed25519_gen(id: String) -> KeyPair {
     let signing_key: SigningKey = SigningKey::generate(&mut csprng);
     let verifying_key = signing_key.verifying_key();
 
+    let mut pk_prefixed = vec![0xed, 0x01];
+    pk_prefixed.extend_from_slice(&verifying_key.to_bytes());
+
     KeyPair {
         id,
         sk: multibase::encode(multibase::Base::Base58Btc, signing_key.to_bytes()),
-        pk: multibase::encode(multibase::Base::Base58Btc, verifying_key.to_bytes()),
+        pk: multibase::encode(multibase::Base::Base58Btc, pk_prefixed),
         key_type: "Ed25519VerificationKey2020".to_string(),
     }
 }
@@ -92,19 +105,15 @@ fn x25519_gen(id: String) -> KeyPair {
     let secret = StaticSecret::random();
     let public = PublicKey::from(&secret);
 
+    let mut pk_prefixed = vec![0xec, 0x01];
+    pk_prefixed.extend_from_slice(&public.to_bytes());
+
     KeyPair {
         id,
         sk: multibase::encode(multibase::Base::Base58Btc, secret.to_bytes()),
-        pk: multibase::encode(multibase::Base::Base58Btc, public.to_bytes()),
+        pk: multibase::encode(multibase::Base::Base58Btc, pk_prefixed),
         key_type: "X25519KeyAgreementKey2019".to_string(),
     }
-}
-
-fn open(pass: String) -> anyhow::Result<Vec<KeyPair>> {
-    let path = get_vault_path()?;
-    let bytes = fs::read(path)?;
-    let keys = decrypt_vault(&bytes, &pass)?;
-    Ok(keys)
 }
 
 fn init(pass: String) -> anyhow::Result<bool> {
@@ -442,9 +451,8 @@ fn did_gen_dialog(s: &mut cursive::Cursive) {
                         let doc = serde_json::json!({
                             "@context": [
                                 "https://www.w3.org/ns/did/v1",
-                                "https://w3id.org/security/suites/ed25519-2020/v1"
                             ],
-                            "id":did,
+                            "id": did,
                             "verificationMethod": verification_methods,
                             "keyAgreement": key_agreement,
                             "assertionMethod": assertion_method
