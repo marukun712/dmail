@@ -432,7 +432,10 @@ fn did_gen_dialog(s: &mut cursive::Cursive) {
 
                         let assertion_method: Vec<String> = keys
                             .iter()
-                            .filter(|k| k.key_type == "Ed25519VerificationKey2020")
+                            .filter(|k| {
+                                k.key_type == "Ed25519VerificationKey2020"
+                                    || k.key_type == "EcdsaSecp256k1VerificationKey2019"
+                            })
                             .map(|k| format!("{}#{}", did, k.id))
                             .collect();
 
